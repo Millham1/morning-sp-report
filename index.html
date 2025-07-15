@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,7 +6,55 @@
   <title>Morning S&P Report</title>
   <style>
     body { margin: 0; font-family: Arial, sans-serif; background: #f0f2f5; color: #333; }
-    header { background: #2b2d42; color: white; padding: 1rem; text-align: center; }
+    header { background: #2b2d42; color: white; padding: 1rem; text-align: center; position: relative; }
+    #ticker-container {
+      display: flex;
+      justify-content: flex-end;
+      align-items: flex-start;
+      padding: 1rem 2in 0 0;
+      gap: 1rem;
+    }
+    #ticker-box {
+      background: #1e1e1e;
+      color: #fff;
+      padding: 0.5rem;
+      width: 2in;
+      height: 3in;
+      overflow-y: auto;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-family: monospace;
+      box-shadow: 0 0 6px rgba(0,0,0,0.3);
+      text-align: left;
+    }
+    #ticker-search {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    #searchInput {
+      width: 150px;
+      padding: 0.4rem;
+      font-size: 0.8rem;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      margin-bottom: 0.5rem;
+    }
+    #searchResult {
+      background: #1e1e1e;
+      color: #fff;
+      padding: 0.5rem;
+      width: 250px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      font-size: 0.85rem;
+      min-height: 3rem;
+    }
+    .ticker-symbol { color: limegreen; font-weight: bold; }
+    .ticker-positive { color: lightgreen; }
+    .ticker-negative { color: red; }
+    .trend-up::after { content: " ↑"; color: green; font-size: 1.5em; }
+    .trend-down::after { content: " ↓"; color: red; font-size: 1.5em; }
     main { padding: 1rem; max-width: 800px; margin: auto; }
     section { background: white; margin: 1rem 0; padding: 1rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
     h1 { margin: 0; }
@@ -28,6 +75,14 @@
     <h1>Morning S&P Report</h1>
     <div id="lastUpdated">Loading...</div>
   </header>
+  <div id="ticker-container">
+    <div id="ticker-box">Loading ticker...</div>
+    <div id="ticker-search">
+      <input type="text" id="searchInput" placeholder="Search ticker..." />
+      <button onclick="clearSearch()">Clear</button>
+      <div id="searchResult"></div>
+    </div>
+  </div>
   <main>
     <section id="macro">
       <h2>Macro Headlines</h2>
@@ -54,84 +109,107 @@
     <button onclick="location.reload()">Refresh</button>
   </main>
   <script>
-    const NEWS_API_KEYS = {
-      newsdata: 'pub_9dc518a86a1147c48b4b072671ce3ca8',
-      gnews: '2ca29948797355a9512aebd0be958da9'
-    };
+    const FINNHUB_KEY = 'd1r4qlpr01qr3fogitqgd1r4qlpr01qr3fogitr0';
+    const NEWS_KEY = 'pub_9dc518a86a1147c48b4b072671ce3ca8';
+    const GNEWS_KEY = '2ca29948797355a9512aebd0be958da9';
+    const TICKER_SYMBOLS = ['AAPL', 'MSFT', 'NVDA', 'GOOGL', 'AMZN', 'META', 'TSLA', 'JPM', 'V', 'UNH'];
 
-    const seenUrls = new Set();
-    const macroKeywords = '"S&P 500" OR SPX OR "Standard & Poor"';
-    const companyKeywords = 'AAPL OR NVDA OR AMZN OR MSFT OR GOOGL OR META';
-
-    async function fetchNewsdata(q) {
-      const url = `https://newsdata.io/api/1/news?apikey=${NEWS_API_KEYS.newsdata}&q=${encodeURIComponent(q)}&language=en&country=us&category=business`;
-      const res = await fetch(url);
-      const json = await res.json();
-      return Array.isArray(json.results) ? json.results.map(a => ({
-        title: a.title,
-        url: a.link,
-        desc: a.description,
-        source: a.source_id,
-        date: a.pubDate
-      })) : [];
-    }
-
-    async function fetchGNews(q) {
-      const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(q)}&token=${NEWS_API_KEYS.gnews}&lang=en&country=us&max=10`;
-      const res = await fetch(url);
-      const json = await res.json();
-      return Array.isArray(json.articles) ? json.articles.map(a => ({
-        title: a.title,
-        url: a.url,
-        desc: a.description,
-        source: a.source.name,
-        date: a.publishedAt
-      })) : [];
-    }
-
-    async function fetchAndDisplayNews(sectionId, keywords) {
-      const combined = [
-        ...(await fetchNewsdata(keywords)),
-        ...(await fetchGNews(keywords))
-      ];
-
-      const ul = document.getElementById(sectionId);
-      const newList = document.createDocumentFragment();
-
-      for (const art of combined) {
-        if (!art.url || seenUrls.has(art.url)) continue;
-        seenUrls.add(art.url);
-        const li = document.createElement('li');
-        li.innerHTML = `
-          <strong><a href="${art.url}" target="_blank" rel="noopener noreferrer">${art.title}</a></strong>
-          <div class="headline-desc">${art.desc || ''}</div>
-          <div class="source">Source: ${art.source}</div>
-          <div class="time">Published: ${new Date(art.date).toLocaleString()}</div>
-        `;
-        newList.appendChild(li);
-      }
-
-      if (newList.childNodes.length) {
-        ul.prepend(newList);
-        while (ul.children.length > 10) ul.removeChild(ul.lastChild);
+    async function fetchNews() {
+      const macroList = document.getElementById('macro-list');
+      const companyList = document.getElementById('company-list');
+      try {
+        const res = await fetch(`https://newsdata.io/api/1/news?apikey=${NEWS_KEY}&country=us&language=en&category=business`);
+        const data = await res.json();
+        if (Array.isArray(data.results)) {
+          macroList.innerHTML = '';
+          companyList.innerHTML = '';
+          for (let item of data.results.slice(0, 10)) {
+            const li = document.createElement('li');
+            li.innerHTML = `<a href="${item.link}" target="_blank">${item.title}</a><div class="headline-desc">${item.description?.split('.')[0] || ''}.</div><div class="source">${item.source_id}</div>`;
+            macroList.appendChild(li);
+          }
+          for (let item of data.results.slice(10, 20)) {
+            const li = document.createElement('li');
+            li.innerHTML = `<a href="${item.link}" target="_blank">${item.title}</a><div class="headline-desc">${item.description?.split('.')[0] || ''}.</div><div class="source">${item.source_id}</div>`;
+            companyList.appendChild(li);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load news', e);
       }
     }
 
-    async function updateAll() {
-      const now = new Date();
-      document.getElementById('lastUpdated').textContent = 'Last updated: ' + now.toLocaleTimeString();
-      const updateList = document.getElementById('update-box');
-      const li = document.createElement('li');
-      li.textContent = `Checked for updates at ${now.toLocaleTimeString()}`;
-      updateList.insertBefore(li, updateList.firstChild);
-      while (updateList.children.length > 10) updateList.removeChild(updateList.lastChild);
+    fetchNews();
+    setInterval(fetchNews, 600000);
 
-      await fetchAndDisplayNews('macro-list', macroKeywords);
-      await fetchAndDisplayNews('company-list', companyKeywords);
+    document.getElementById('searchInput').addEventListener('input', async function () {
+      const symbol = this.value.toUpperCase().trim();
+      const box = document.getElementById('searchResult');
+      if (!symbol) {
+        box.innerHTML = '';
+        return;
+      }
+      try {
+        const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_KEY}`);
+        const data = await res.json();
+        if (data && data.c && data.o && data.pc) {
+          const change = data.c - data.pc;
+          const trend = change >= 0 ? 'trend-up' : 'trend-down';
+          box.innerHTML = `<div class="${trend}"><strong>${symbol}</strong><br>
+            Last: $${data.c}<br>
+            Open: $${data.o}<br>
+            Prior Close: $${data.pc}<br>
+            Net Change: $${change.toFixed(2)}</div>`;
+        } else {
+          box.innerHTML = 'No data found';
+        }
+      } catch (e) {
+        box.innerHTML = 'Error fetching data';
+      }
+    });
+
+    function clearSearch() {
+      document.getElementById('searchInput').value = '';
+      document.getElementById('searchResult').innerHTML = '';
     }
 
-    updateAll();
-    setInterval(updateAll, 10 * 60 * 1000);
+    async function fetchTickerPrices() {
+      const box = document.getElementById('ticker-box');
+      let results = [];
+      try {
+        for (const symbol of TICKER_SYMBOLS) {
+          const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_KEY}`);
+          const data = await res.json();
+          if (data.c && data.pc) {
+            const change = data.c - data.pc;
+            const percent = (change / data.pc) * 100;
+            results.push({ symbol, price: data.c, percent });
+          } else {
+            console.warn(`No valid data for ${symbol}`, data);
+            results.push({ symbol, price: null, percent: null });
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching ticker data:", err);
+        box.innerHTML = 'Error loading ticker data';
+        return;
+      }
+
+      results.sort((a, b) => Math.abs(b.percent || 0) - Math.abs(a.percent || 0));
+      let content = '<strong>S&P 500</strong><br><br>';
+      for (const { symbol, price, percent } of results) {
+        if (price !== null && percent !== null) {
+          const colorClass = percent >= 0 ? 'ticker-positive' : 'ticker-negative';
+          content += `<span class="ticker-symbol">${symbol}</span>: $${price.toFixed(2)} <span class="${colorClass}">${percent.toFixed(2)}%</span><br>`;
+        } else {
+          content += `<span class="ticker-symbol">${symbol}</span>: N/A<br>`;
+        }
+      }
+      box.innerHTML = content || 'Ticker data unavailable';
+    }
+
+    fetchTickerPrices();
+    setInterval(fetchTickerPrices, 60000);
   </script>
 </body>
 </html>
