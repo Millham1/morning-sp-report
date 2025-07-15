@@ -1,0 +1,137 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Morning S&P Report</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f0f2f5; color: #333; }
+    header { background: #2b2d42; color: white; padding: 1rem; text-align: center; }
+    main { padding: 1rem; max-width: 800px; margin: auto; }
+    section { background: white; margin: 1rem 0; padding: 1rem; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    h1 { margin: 0; }
+    h2 { margin-top: 0; border-bottom: 1px solid #ddd; padding-bottom: 0.5rem; }
+    ul { list-style: none; padding: 0; }
+    li { padding: 0.5rem 0; border-bottom: 1px solid #eee; }
+    li:last-child { border-bottom: none; }
+    .time { color: #888; font-size: 0.9em; }
+    .headline-desc { margin-top: 0.25rem; font-size: 0.95em; }
+    .source { font-style: italic; font-size: 0.85em; color: #666; margin-top: 0.25rem; }
+    button { background: #1a73e8; color: white; border: none; padding: 0.5rem 1rem; margin-top: 1rem; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #1669c1; }
+    #auto-updates { background: #fffbe6; border: 1px solid #ffe58f; padding: 1rem; margin-top: 1rem; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Morning S&P Report</h1>
+    <div id="lastUpdated">Loading...</div>
+  </header>
+  <main>
+    <section id="macro">
+      <h2>Macro Headlines</h2>
+      <ul id="macro-list"></ul>
+    </section>
+    <section id="company">
+      <h2>Company Headlines</h2>
+      <ul id="company-list"></ul>
+    </section>
+    <section>
+      <h2>Upcoming Government Reports</h2>
+      <ul>
+        <li>Jul 15, 2025 08:30 — <strong>Consumer Price Index (CPI)</strong> (US)</li>
+        <li>Jul 16, 2025 08:30 — <strong>Producer Price Index (PPI)</strong> (US)</li>
+        <li>Jul 16, 2025 09:15 — <strong>Industrial Production</strong> (US)</li>
+      </ul>
+    </section>
+    <section id="auto-updates">
+      <h2>Live Auto Updates (Every 10 Minutes)</h2>
+      <ul id="update-box">
+        <li>Waiting for first update...</li>
+      </ul>
+    </section>
+    <button onclick="location.reload()">Refresh</button>
+  </main>
+  <script>
+    const NEWS_API_KEYS = {
+      newsdata: 'pub_9dc518a86a1147c48b4b072671ce3ca8',
+      gnews: '2ca29948797355a9512aebd0be958da9'
+    };
+
+    const seenUrls = new Set();
+    const macroKeywords = '"S&P 500" OR SPX OR "Standard & Poor"';
+    const companyKeywords = 'AAPL OR NVDA OR AMZN OR MSFT OR GOOGL OR META';
+
+    async function fetchNewsdata(q) {
+      const url = `https://newsdata.io/api/1/news?apikey=${NEWS_API_KEYS.newsdata}&q=${encodeURIComponent(q)}&language=en&country=us&category=business`;
+      const res = await fetch(url);
+      const json = await res.json();
+      return Array.isArray(json.results) ? json.results.map(a => ({
+        title: a.title,
+        url: a.link,
+        desc: a.description,
+        source: a.source_id,
+        date: a.pubDate
+      })) : [];
+    }
+
+    async function fetchGNews(q) {
+      const url = `https://gnews.io/api/v4/search?q=${encodeURIComponent(q)}&token=${NEWS_API_KEYS.gnews}&lang=en&country=us&max=10`;
+      const res = await fetch(url);
+      const json = await res.json();
+      return Array.isArray(json.articles) ? json.articles.map(a => ({
+        title: a.title,
+        url: a.url,
+        desc: a.description,
+        source: a.source.name,
+        date: a.publishedAt
+      })) : [];
+    }
+
+    async function fetchAndDisplayNews(sectionId, keywords) {
+      const combined = [
+        ...(await fetchNewsdata(keywords)),
+        ...(await fetchGNews(keywords))
+      ];
+
+      const ul = document.getElementById(sectionId);
+      const newList = document.createDocumentFragment();
+
+      for (const art of combined) {
+        if (!art.url || seenUrls.has(art.url)) continue;
+        seenUrls.add(art.url);
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <strong><a href="${art.url}" target="_blank" rel="noopener noreferrer">${art.title}</a></strong>
+          <div class="headline-desc">${art.desc || ''}</div>
+          <div class="source">Source: ${art.source}</div>
+          <div class="time">Published: ${new Date(art.date).toLocaleString()}</div>
+        `;
+        newList.appendChild(li);
+      }
+
+      if (newList.childNodes.length) {
+        ul.prepend(newList);
+        while (ul.children.length > 10) ul.removeChild(ul.lastChild);
+      }
+    }
+
+    async function updateAll() {
+      const now = new Date();
+      document.getElementById('lastUpdated').textContent = 'Last updated: ' + now.toLocaleTimeString();
+      const updateList = document.getElementById('update-box');
+      const li = document.createElement('li');
+      li.textContent = `Checked for updates at ${now.toLocaleTimeString()}`;
+      updateList.insertBefore(li, updateList.firstChild);
+      while (updateList.children.length > 10) updateList.removeChild(updateList.lastChild);
+
+      await fetchAndDisplayNews('macro-list', macroKeywords);
+      await fetchAndDisplayNews('company-list', companyKeywords);
+    }
+
+    updateAll();
+    setInterval(updateAll, 10 * 60 * 1000);
+  </script>
+</body>
+</html>
